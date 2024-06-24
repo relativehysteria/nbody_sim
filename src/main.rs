@@ -1,79 +1,124 @@
+use rayon::prelude::*;
+use std::collections::HashSet;
+use std::sync::{Mutex, RwLock};
+use std::ops::{Mul, Add, Div};
+use std::arch::x86_64::_rdtsc;
+
 use nbody_simulation::body::Body;
 use nbody_simulation::vector::VecN;
+use nbody_simulation::consts::*;
+use nbody_simulation::rng::Rng;
 
-/// Gravitational constant
-const G: f64 = 6.67430e-11;
+fn random_body<const DIMENSIONS: usize>(rng: &mut Rng, id: isize,
+                                        mass: (f64, f64)) -> Body<DIMENSIONS> {
+    let mass = rng.range(mass.0 as u64, mass.1 as u64) as f64;
+    let pos = VecN::new([rng.range(0, N_BODIES as u64) as f64; DIMENSIONS]);
+    let vel = VecN::new([0.; DIMENSIONS]);
 
-/// The number of dimensions to simulate
-const DIMENSIONS: usize = 2;
-
-/// Time step in seconds
-const DT: f64 = 60. * 60.;
-
-/// For how many `DT` time steps the simulation runs before it stops
-const SIM_STEPS: usize = usize::MAX;
-
-/// The factor by which all vectors are scaled
-const SCALE: f64 = 1.0e30;
-
-/// The inverse of the scale to make calculations faster
-const SCALE_INV: f64 = 1. / SCALE;
-
-const EARTH_POS: VecN<DIMENSIONS> = VecN::new([1.496e11 * SCALE_INV, 0.]);
-const EARTH_VEL: VecN<DIMENSIONS> = VecN::new([0., 29780. * SCALE_INV]);
-
-fn update_forces<const DIMENSIONS: usize>(bodies: &mut [Body<DIMENSIONS>]) {
-    for b1i in 0..bodies.len() {
-        let mut force: VecN<DIMENSIONS> = VecN::default();
-
-        for (b2i, b2) in bodies.iter().enumerate() {
-            if b1i == b2i { continue; }
-            let b1 = &bodies[b1i];
-
-            let distance = b1.pos.distance(&b2.pos).powi(2) * 0.5;
-            let f_mag = G * b1.mass * b2.mass * distance;
-            let mut f_dir = b1.pos - b2.pos;
-            f_dir.normalize();
-            force += f_dir * f_mag;
-        }
-
-        bodies[b1i].force = force;
-    }
+    Body::new(id, mass, pos, vel)
 }
 
-fn check_nan<const DIMENSIONS: usize>(body: &Body<DIMENSIONS>) -> bool {
-    body.pos.is_nan() || body.vel.is_nan() || body.force.is_nan()
-}
+fn merge_connected<const DIMENSIONS: usize>(bodies: &mut Vec<Body<DIMENSIONS>>,
+                                            threshold: f64) {
+    let pairs_to_merge = Mutex::new(Vec::new());
+    let body_count = bodies.len();
 
-fn main() {
-    const NULL_VEC: VecN<DIMENSIONS> = VecN::new([0., 0.]);
-
-    // Spawn the bodies
-    let mut bodies = [
-        Body::new("Sun", 1.989e30 * SCALE_INV, NULL_VEC, NULL_VEC),
-        Body::new("Earth", 5.972e24 * SCALE_INV, EARTH_POS, EARTH_VEL),
-        Body::new("Moon", 7.348e22 * SCALE_INV,
-                  EARTH_POS + VecN::new([384_400_000. * SCALE_INV, 0.,]),
-                  EARTH_VEL + VecN::new([0., 1022. * SCALE_INV])),
-    ];
-
-    for step in 1..=SIM_STEPS {
-        // Update the forces
-        update_forces(&mut bodies);
-
-        // Update the bodies
-        for body in bodies.iter_mut() {
-            body.update_velocity(DT);
-            body.update_position(DT);
-            if check_nan(&body) {
-                println!("{step}: {}", body.name);
-                std::process::exit(1);
+    // Step 1: Find all pairs of bodies that should be merged
+    (0..body_count).into_par_iter().for_each(|i| {
+        let mut local_pairs = Vec::new();
+        for j in (i + 1)..body_count {
+            let distance = bodies[i].pos.distance(&bodies[j].pos);
+            if distance < threshold {
+                local_pairs.push((i, j));
             }
         }
+        pairs_to_merge.lock().unwrap().extend(local_pairs);
+    });
 
-        // println!("Step: {step}: ---------------------------------------------");
-        // for body in bodies.iter() {
-        //     println!(">  {} | {} | {}", body.name, body.pos, body.vel);
-        // }
+    // Step 2: Sort and merge bodies
+    let mut pairs_to_merge = pairs_to_merge.into_inner().unwrap();
+    pairs_to_merge.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut merged_indices = HashSet::new();
+    let mut new_bodies = Vec::new();
+
+    for (i, j) in pairs_to_merge {
+        let body1 = &bodies[i];
+        let body2 = &bodies[j];
+
+        if merged_indices.contains(&body1.id) ||
+            merged_indices.contains(&body2.id) {
+            continue;
+        }
+
+        // Merge bodies[i] and bodies[j]
+        let new_mass = body1.mass + body2.mass;
+        let new_pos = body1.pos.mul(body1.mass)
+            .add(body2.pos.mul(body2.mass)).div(new_mass);
+        let new_vel = body1.vel.mul(body1.mass)
+            .add(body2.vel.mul(body2.mass)).div(new_mass);
+
+        let new_body = Body {
+            id: body1.id * -1,
+            pos: new_pos,
+            vel: new_vel,
+            mass: new_mass * 0.6,
+            force: RwLock::new(VecN::new([0.0; DIMENSIONS])),
+        };
+
+        merged_indices.insert(body1.id);
+        merged_indices.insert(body2.id);
+        new_bodies.push(new_body);
+    }
+
+    // Step 3: Remove merged bodies and add new bodies
+    bodies.retain(|body| !merged_indices.contains(&body.id));
+    bodies.extend(new_bodies);
+}
+
+
+fn main() {
+    // Initialize the RNG
+    let seed = unsafe { _rdtsc() };
+    println!("SEED: {seed}");
+    let mut rng = Rng::new(seed);
+
+    // Keep a vector to prevent the simulation from devolving;
+    // if within 10 steps there's no body merges, reset the simulation
+    let mut last = Vec::with_capacity(10);
+
+    loop {
+        println!("Rng state: {}", rng.rand());
+
+        // Spawn the bodies
+        let mut bodies: Vec<_> = (0..N_BODIES)
+            .map(|id| random_body::<DIMENSIONS>(&mut rng, id as isize, (10., 100.)))
+            .collect();
+
+        last.clear();
+
+        for _ in 1..=SIM_STEPS {
+            // Update the forces
+            bodies.par_iter().for_each(|body| {
+                body.update_force(&bodies);
+            });
+
+            // Update the bodies
+            bodies.par_iter_mut().for_each(|body| {
+                body.update_velocity(DT);
+                body.update_position(DT);
+            });
+
+            // Merge bodies that are close enough
+            merge_connected(&mut bodies, 0.2);
+
+            // God has forsaken this place
+            println!("{}", bodies.len());
+            last.push(bodies.len());
+            if last.len() == 10 {
+                if last.iter().sum::<usize>() / 10 == bodies.len() { break; }
+                last.clear();
+            }
+        }
     }
 }

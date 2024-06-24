@@ -3,7 +3,7 @@ use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign};
 #[derive(Copy, Clone, Debug)]
 /// A generic vector
 pub struct VecN<const DIMENSIONS: usize> {
-    coords: [f64; DIMENSIONS],
+    pub coords: [f64; DIMENSIONS],
 }
 
 impl<const DIMENSIONS: usize> core::default::Default for VecN<DIMENSIONS> {
@@ -45,7 +45,7 @@ impl<const DIMENSIONS: usize> VecN<DIMENSIONS> {
     /// Normalizes the vector, making its magnitude 1
     pub fn normalize(&mut self) {
         let mag = self.magnitude();
-        if mag != 0.0 {
+        if mag > 0.1 {
             for coord in self.coords.iter_mut() {
                 *coord /= mag;
             }

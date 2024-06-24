@@ -8,6 +8,7 @@ use nbody_simulation::body::Body;
 use nbody_simulation::vector::VecN;
 use nbody_simulation::consts::*;
 use nbody_simulation::rng::Rng;
+use nbody_simulation::quadtree::QuadTreeNode;
 
 fn random_body<const DIMENSIONS: usize>(rng: &mut Rng, id: isize,
                                         mass: (f64, f64)) -> Body<DIMENSIONS> {
@@ -23,7 +24,7 @@ fn merge_connected<const DIMENSIONS: usize>(bodies: &mut Vec<Body<DIMENSIONS>>,
     let pairs_to_merge = Mutex::new(Vec::new());
     let body_count = bodies.len();
 
-    // Step 1: Find all pairs of bodies that should be merged
+    // Find all pairs of bodies that should be merged
     (0..body_count).into_par_iter().for_each(|i| {
         let mut local_pairs = Vec::new();
         for j in (i + 1)..body_count {
@@ -35,7 +36,7 @@ fn merge_connected<const DIMENSIONS: usize>(bodies: &mut Vec<Body<DIMENSIONS>>,
         pairs_to_merge.lock().unwrap().extend(local_pairs);
     });
 
-    // Step 2: Sort and merge bodies
+    // Sort and merge bodies
     let mut pairs_to_merge = pairs_to_merge.into_inner().unwrap();
     pairs_to_merge.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -71,7 +72,7 @@ fn merge_connected<const DIMENSIONS: usize>(bodies: &mut Vec<Body<DIMENSIONS>>,
         new_bodies.push(new_body);
     }
 
-    // Step 3: Remove merged bodies and add new bodies
+    // Remove merged bodies and add new bodies
     bodies.retain(|body| !merged_indices.contains(&body.id));
     bodies.extend(new_bodies);
 }
@@ -98,9 +99,17 @@ fn main() {
         last.clear();
 
         for _ in 1..=SIM_STEPS {
+            // Build the quadtree
+            let mut quadtree: QuadTreeNode<DIMENSIONS> = QuadTreeNode::new(
+                VecN::new([N_BODIES as f64 / 2.0; DIMENSIONS]), N_BODIES as f64);
+            for body in &bodies {
+                quadtree.insert(body.clone());
+            }
+            quadtree.compute_multipole_expansion();
+
             // Update the forces
             bodies.par_iter().for_each(|body| {
-                body.update_force(&bodies);
+                body.update_force_fmm(&quadtree, 0.5);
             });
 
             // Update the bodies

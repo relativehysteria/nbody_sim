@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::vector::VecN;
 use crate::consts::*;
+use crate::quadtree::QuadTreeNode;
 use std::sync::RwLock;
 
 #[derive(Debug)]
@@ -10,6 +11,15 @@ pub struct Body<const DIMENSIONS: usize> {
     pub pos: VecN<DIMENSIONS>,
     pub vel: VecN<DIMENSIONS>,
     pub force: RwLock<VecN<DIMENSIONS>>,
+}
+
+impl<const DIMENSIONS: usize> core::clone::Clone for Body<DIMENSIONS> {
+    fn clone(&self) -> Body<DIMENSIONS> {
+        let body = Body::new(self.id, self.mass,
+                                 self.pos.clone(), self.vel.clone());
+        *body.force.write().unwrap() = *self.force.read().unwrap();
+        body
+    }
 }
 
 impl<const DIMENSIONS: usize> Body<DIMENSIONS> {
@@ -54,5 +64,10 @@ impl<const DIMENSIONS: usize> Body<DIMENSIONS> {
             let mut force = self.force.write().unwrap();
             *force = net_force
         }
+    }
+
+    pub fn update_force_fmm(&self, quadtree: &QuadTreeNode<DIMENSIONS>, theta: f64) {
+        let net_force = quadtree.evaluate_force(self, theta);
+        *self.force.write().unwrap() = net_force;
     }
 }

@@ -1,19 +1,18 @@
 use std::arch::x86_64::_rdtsc;
-use std::time::Instant;
 
-use nbody_simulation::body::Body;
-use nbody_simulation::vector::VecN;
+use nbody_simulation::{ Rng, SpatialTree, Body, VecN, BoundingBox };
 use nbody_simulation::consts::*;
-use nbody_simulation::rng::Rng;
-use nbody_simulation::implementations::*;
 
-fn random_body<const DIMENSIONS: usize>(rng: &mut Rng, id: isize,
-                                        mass: (f64, f64)) -> Body<DIMENSIONS> {
+fn random_body<const DIMENSIONS: usize>(rng: &mut Rng, id: usize,
+                                        rad: (f64, f64), mass: (f64, f64)
+                                        ) -> Body<DIMENSIONS> {
     let mass = rng.range(mass.0 as u64, mass.1 as u64) as f64;
-    let pos = VecN::new([rng.range(0, N_BODIES as u64 * 2) as f64; DIMENSIONS]);
+    let rad  = rng.range(rad.0 as u64, rad.1 as u64) as f64;
+    let pos = VecN::new(
+        core::array::from_fn(|_| rng.range(0, MAX_DIST as u64) as f64));
     let vel = VecN::new([0.; DIMENSIONS]);
 
-    Body::new(id, mass, pos, vel)
+    Body::new(id, mass, rad, pos, vel)
 }
 
 fn main() {
@@ -22,17 +21,18 @@ fn main() {
     println!("SEED: {seed}");
     let mut rng = Rng::new(seed);
 
-
     // Spawn the bodies
     let bodies: Vec<_> = (0..N_BODIES)
-        .map(|id| random_body::<DIMENSIONS>(&mut rng, id as isize, (1., MAX_MASS)))
+        .map(|id| random_body::<DIMENSIONS>(&mut rng, id,
+                                            (1., MAX_RAD), (1., MAX_MASS)))
         .collect();
 
-    let now = Instant::now();
-    fmm(&mut (bodies.clone()));
-    println!("{:?}", now.elapsed());
+    // Crate the tree and insert the bodies
+    let bounding_box: BoundingBox<DIMENSIONS> =
+        BoundingBox::from(0., MAX_DIST as f64);
+    let mut tree: SpatialTree<DIMENSIONS> = SpatialTree::empty();
+    bodies.iter().for_each(|b| tree.insert(b.pos, b.mass, bounding_box));
 
-    let now = Instant::now();
-    naive(&mut (bodies.clone()));
-    println!("{:?}", now.elapsed());
+    println!("{bodies:#?}");
+    println!("{tree:#?}");
 }

@@ -1,6 +1,16 @@
-pub mod body;
 pub mod vector;
-pub mod consts;
+pub use vector::VecN;
+
+pub mod body;
+pub use body::Body;
+
 pub mod rng;
-pub mod quadtree;
-pub mod implementations;
+pub use rng::Rng;
+
+pub mod boundingbox;
+pub use boundingbox::BoundingBox;
+
+pub mod consts;
+
+pub mod spatialtree;
+pub use spatialtree::SpatialTree;

@@ -1,5 +1,5 @@
-use crate::{ VecN, BoundingBox };
-use crate::consts::DIMENSIONS;
+use crate::{ VecN, BoundingBox, Body };
+use crate::consts::*;
 
 const DIM_POW: usize = 1 << DIMENSIONS;
 
@@ -12,32 +12,38 @@ pub struct SpatialTree<const DIMENSIONS: usize> {
     /// Mass of this tree node
     pub mass: f64,
 
+    /// Bounding box of this tree node
+    pub bb: BoundingBox<DIMENSIONS>,
+
     /// Children of this tree node
     pub children: [Option<Box<Self>>; DIM_POW],
 }
 
 impl<const DIMENSIONS: usize> SpatialTree<DIMENSIONS> {
     /// Constucts a new tree with no children
-    pub fn empty() -> Self {
+    pub fn empty(bb: BoundingBox<DIMENSIONS>) -> Self {
         Self {
             pos: VecN::from(0.),
             mass: 0.,
+            bb,
             children: core::array::from_fn(|_| None),
         }
     }
 
     /// Constructs a new child under the node `self.children[idx]`
-    pub fn new_child(&mut self, idx: usize, pos: VecN<DIMENSIONS>, mass: f64) {
+    pub fn new_child(&mut self, idx: usize, pos: VecN<DIMENSIONS>, mass: f64,
+                     bb: BoundingBox<DIMENSIONS>) {
         self.children[idx] = Some(Box::new(Self {
             pos,
             mass,
+            bb,
             children: core::array::from_fn(|_| None),
         }))
     }
 
     /// Checks if this node is a leaf (has no children)
     pub fn is_leaf(&self) -> bool {
-        self.children.iter().any(|i| i.is_some())
+        self.children.iter().all(|i| i.is_none())
     }
 
     /// Update the center of mass of this node
@@ -67,6 +73,7 @@ impl<const DIMENSIONS: usize> SpatialTree<DIMENSIONS> {
         if self.mass <= 0. {
             self.pos = pos;
             self.mass = mass;
+            self.bb = bb;
             return;
         }
 
@@ -111,7 +118,8 @@ impl<const DIMENSIONS: usize> SpatialTree<DIMENSIONS> {
             let mut parent_quadr = parent_bb.quadrant(parent_pos);
             while quadr == parent_quadr {
                 // Create the cell containing both
-                parent.new_child(quadr, child_pos, child_mass);
+                parent.new_child(quadr, child_pos, child_mass,
+                                 parent_bb.child(quadr));
                 parent = parent.children[quadr].as_mut().unwrap();
 
                 // Split at the center and continue down the tree
@@ -120,9 +128,48 @@ impl<const DIMENSIONS: usize> SpatialTree<DIMENSIONS> {
                 parent_quadr = parent_bb.quadrant(parent_pos);
             }
             // Quadrants are different, insert the parent into its quadrant
-            parent.new_child(parent_quadr, parent_pos, parent_mass);
+            parent.new_child(parent_quadr, parent_pos, parent_mass,
+                             parent_bb.child(parent_quadr));
         }
         // Insert the new child into its quadrant
-        parent.new_child(quadr, pos, mass);
+        parent.new_child(quadr, pos, mass, parent_bb.child(quadr));
+    }
+
+    pub fn compute_force(&self, body: &Body<DIMENSIONS>,
+                         theta: f64) -> VecN<DIMENSIONS> {
+        // Calculate force using the Barnes-Hut algorithm
+        let mut force = VecN::from(0.);
+
+        if self.is_leaf() {
+            // If it's a leaf node, calculate direct gravitational force
+            let distance = self.pos.distance(&body.pos);
+            if distance > 0.0 {
+                let direction = (self.pos - body.pos) / distance;
+                let force_magnitude = (G * self.mass * body.mass) / (distance * distance);
+                force += direction * force_magnitude;
+            }
+        } else {
+            // Otherwise, apply the Barnes-Hut criterion
+            // This here assumes the size for all bounding boxes is uniform --
+            // i.e. this uses the x coordinate
+            let size = self.bb.diff(0);
+            let distance = self.pos.distance(&body.pos);
+
+            if size / distance < theta {
+                // Treat this node as a single body
+                let direction = (self.pos - body.pos) / distance;
+                let force_magnitude = (G * self.mass * body.mass) / (distance * distance);
+                force += direction * force_magnitude;
+            } else {
+                // Recursively calculate the force from each child
+                for child in &self.children {
+                    if let Some(child) = child {
+                        force += child.compute_force(body, theta);
+                    }
+                }
+            }
+        }
+
+        force
     }
 }

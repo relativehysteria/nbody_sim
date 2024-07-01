@@ -37,4 +37,10 @@ impl<const DIMENSIONS: usize> Body<DIMENSIONS> {
     pub fn update_position(&mut self, dt: f64) {
         self.pos += self.vel * dt;
     }
+
+    /// Apply force to this body, only updating its velocity, not position
+    pub fn apply_force(&mut self, force: VecN<DIMENSIONS>, dt: f64) {
+        let acceleration = force / self.mass;
+        self.vel += acceleration * dt;
+    }
 }

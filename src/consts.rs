@@ -5,10 +5,13 @@ pub const MAX_MASS: f64 = 1000.;
 pub const G: f64 = 1.;
 
 /// Theta value for the Barnes-Hut method
-pub const THETA: f64 = 1.;
+pub const THETA: f64 = 0.5;
 
 /// Amount of bodies to spawn
-pub const N_BODIES: usize = 20_000;
+pub const N_BODIES: usize = 10_000;
+
+/// Amount of black holes to spawn
+pub const N_HOLES: usize = 1;
 
 /// The maximum distance of the simulation in all directions
 pub const MAX_DIST: usize = 1080;

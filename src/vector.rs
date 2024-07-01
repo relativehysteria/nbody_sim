@@ -18,11 +18,15 @@ impl<const DIMENSIONS: usize> VecN<DIMENSIONS> {
         Self([value; DIMENSIONS])
     }
 
-    /// Clamps each coordinate within -`limit` to `limit`
-    pub fn limit(&mut self, limit: f64) {
+    /// Clamps each coordinate within `min` and `max` and returns whether
+    /// any of the coordinates was clamped
+    pub fn limit(&mut self, min: f64, max: f64) -> bool {
+        let mut clamped = 0;
         for coord in self.0.iter_mut() {
-            *coord = coord.clamp(-limit, limit);
+            *coord = coord.clamp(min, max);
+            clamped += ((*coord == min) || (*coord == max)) as usize;
         }
+        clamped > 0
     }
 
     /// Returns the magnitude (length) of the vector
